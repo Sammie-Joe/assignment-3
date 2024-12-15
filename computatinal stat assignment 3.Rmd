@@ -1,0 +1,584 @@
+---
+title: "Computational Statistics (Assignment 3)"
+author: "ELUWA SAMUEL IFEANYI"
+date: "`r Sys.Date()`"
+output:
+  pdf_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(table1)
+```
+
+## QUESTION 1 SOLUTION 
+
+## Step 1: Generate Data from the 3-Parameter Logistic Model  
+
+## We will start by generating synthetic data from a logistic model with three parameters. The model can be represented as:
+
+
+
+1. Data Generation
+Steps:
+
+    Set up parameters:
+  $$\beta_0=0.1,\beta_1=1.1, \beta_2= \neg0.9$$
+    
+ 2. Generate covariates: Sample 
+  $$x_1\ ^(\ ^n\ ^)\ and\ x_2\ ^(\ ^n\ ^) for\  n=1,……,N\  from\  Uniform[\neg2,2].$$
+  
+  
+3. Compute probabilities: Use the logistic function:
+
+$$p\left(y^{(n)}_i = 1 \mid x^{(n)}_1, x^{(n)}_2 \right) = \frac{1}{1 + \exp\left(\neg\left(\beta_0 + \beta_1 x^{(n)}_1 + \beta_2 x^{(n)}_2\right)\right)}$$
+
+
+   
+   
+
+Given this, we will generate data for N=200 observations. Here's the R code for this:
+
+
+
+```{r pressure1, echo=FALSE}
+# 1a,
+generate_logistic_data <- function(N) {
+  # Set the true intercept and regression coefficients
+  intercept <- 0.1
+  beta1 <- 1.1
+  beta2 <- -0.9
+
+# (1b) Generate N random values for the two covariates from Uniform[-2, 2]
+  covariate1 <- runif(N, -2, 2)
+  covariate2 <- runif(N, -2, 2)
+  
+  # Calculate the linear predictor (log-odds) for the logistic model
+  log_odds <- intercept + beta1 * covariate1 + beta2 * covariate2
+  
+  # Convert log-odds to probabilities using the logistic function
+  probabilities <- 1 / (1 + exp(-log_odds))
+
+# Generate binary responses (0 or 1) based on these probabilities
+  res <- rbinom(N, 1, probabilities)
+  
+  # Combine into a data frame for easy viewing and return the data
+  data_1<- data.frame(covariate1 = covariate1, covariate2 = covariate2, response = res)
+  return(data_1)
+}
+
+# Example usage:
+set.seed(123) # For reproducibility
+data_generated1 <- generate_logistic_data(200)
+table1::table1(~factor(data_generated1$response))
+```
+
+Overall (N=200): The sample size is 10, meaning there are 10 observations 
+in total.
+
+0: 91(45.5%): Out of 200 total responses, 91 observations (45.5%) have the value 0.
+1: 109(54.5%): The remaining 109 observations (54.5%) have the value 1.
+
+So, the variable response has an equal split between the two categories 0 and 1,
+
+```{r}
+
+```
+
+## QUESTION 2 Solution (Implementing Metropolis-Hastings with Gaussian Proposal)
+
+
+```{r pressure2, echo=FALSE}
+# Libraries
+library(coda)  # For Gelman-Rubin diagnostic
+
+# Logistic function
+logistic <- function(x) {
+  return(1 / (1 + exp(-x)))
+}
+
+# Log posterior function
+log_posterior <- function(beta, X, y) {
+  # Prior term: Gaussian N(0, 1)
+  log_prior <- sum(dnorm(beta, mean = 0, sd = 1, log = TRUE))
+  
+  # Likelihood term
+  eta <- X %*% beta
+  log_likelihood <- sum(y * log(logistic(eta)) + (1 - y) * log(1 - logistic(eta)))
+  
+  return(log_prior + log_likelihood)
+}
+
+# Metropolis-Hastings Sampler
+metropolis_hastings <- function(start, X, y, n_iter, proposal_sd) {
+  beta <- start
+  samples <- matrix(NA, nrow = n_iter, ncol = length(start))
+  acceptance_count <- 0
+  
+  for (i in 1:n_iter) {
+    proposal <- beta + rnorm(length(beta), mean = 0, sd = proposal_sd)
+    log_acceptance_ratio <- log_posterior(proposal, X, y) - log_posterior(beta, X, y)
+    
+    if (log(runif(1)) < log_acceptance_ratio) {
+      beta <- proposal
+      acceptance_count <- acceptance_count + 1
+    }
+    
+    samples[i, ] <- beta
+  }
+  
+  acceptance_rate <- acceptance_count / n_iter
+  return(list(samples = samples, acceptance_rate = acceptance_rate))
+}
+
+# Generate synthetic data
+set.seed(123)
+n <- 200
+p <- 3
+X <- cbind(1, matrix(rnorm(n * (p - 1)), nrow = n))
+true_beta <- c(0.1, 1.1, -0.9)
+y <- rbinom(n, size = 1, prob = logistic(X %*% true_beta))
+
+# Run Metropolis-Hastings
+n_iter <- 5000
+start <- c(0.1, 1.1, -0.9)
+proposal_sd <- 0.2  # Adjust to achieve ~23.4% acceptance rate
+mh_result <- metropolis_hastings(start, X, y, n_iter, proposal_sd)
+
+# Trace plots
+samples <- mh_result$samples
+par(mfrow = c(3, 3))
+for (j in 1:p) {
+  plot(samples[, j], type = 'l', main = paste0("Trace plot for beta[", j, "]"), 
+       xlab = "Iteration", ylab = paste0("beta[", j, "]"))
+}
+```
+
+The trace plots indicate that the MCMC chains for beta[1], beta[2], and beta[3]
+have converged and are mixing well.
+
+There are no signs of non-convergence or poor mixing.
+The posterior samples for these parameters can be considered reliable for 
+inference. 
+
+
+```{r}
+
+```
+
+## Histograms with posterior mean and true value
+```{r pressure222, echo=FALSE}
+# Burn-in period
+burn_in <- 1000
+post_burn_samples <- samples[(burn_in + 1):n_iter, ]
+
+# Histograms with posterior mean and true value
+par(mfrow = c(3, 3))
+for (j in 1:p) {
+  hist(post_burn_samples[, j], breaks = 30, probability = TRUE,
+       main = paste0("Histogram for beta[", j, "]"),
+       xlab = paste0("beta[", j, "]"), col = "lightblue")
+  abline(v = mean(post_burn_samples[, j]), col = "red", lwd = 2, lty = 2)  # Posterior mean
+  abline(v = true_beta[j], col = "green", lwd = 2, lty = 2)  # True value
+  legend("topright", legend = c("Posterior Mean", "True Value"), 
+         col = c("red", "green"), lty = 2, lwd = 2)
+}
+```
+
+The histograms you're showing represent the distribution of posterior samples for three different beta parameters. 
+
+The MCMC process estimates the posterior distributions of the parameters. 
+
+The posterior means are very close to the true values of the parameters, suggesting that the sampler is working well.
+
+The density distributions for each parameter are fairly narrow, indicating good precision in the estimates. The alignment of the posterior mean with the true value also suggests that the model has a good fit to the data.
+
+```{r}
+
+```
+
+## QUESTION 3 Solution (Gelman-Rubin Diagnostic)
+
+```{r pressure3, fig.width=5, fig.height=3, out.width="50%",echo=FALSE}
+# Gelman-Rubin Diagnostic
+
+# Libraries
+library(coda)  # For Gelman-Rubin diagnostic
+
+# Logistic function
+logistic <- function(x) {
+  return(1 / (1 + exp(-x)))
+}
+
+# Log posterior function
+log_posterior <- function(beta, X, y) {
+  # Prior term: Gaussian N(0, 1)
+  log_prior <- sum(dnorm(beta, mean = 0, sd = 1, log = TRUE))
+  
+  # Likelihood term
+  eta <- X %*% beta
+  log_likelihood <- sum(y * log(logistic(eta)) + (1 - y) * log(1 - logistic(eta)))
+  
+  return(log_prior + log_likelihood)
+}
+
+# Metropolis-Hastings Sampler
+metropolis_hastings <- function(start, X, y, n_iter, proposal_sd) {
+  beta <- start
+  samples <- matrix(NA, nrow = n_iter, ncol = length(start))
+  acceptance_count <- 0
+  
+  for (i in 1:n_iter) {
+    proposal <- beta + rnorm(length(beta), mean = 0, sd = proposal_sd)
+    log_acceptance_ratio <- log_posterior(proposal, X, y) - log_posterior(beta, X, y)
+    
+    if (log(runif(1)) < log_acceptance_ratio) {
+      beta <- proposal
+      acceptance_count <- acceptance_count + 1
+    }
+    
+    samples[i, ] <- beta
+  }
+  
+  acceptance_rate <- acceptance_count / n_iter
+  return(list(samples = samples, acceptance_rate = acceptance_rate))
+}
+
+# Generate synthetic data
+set.seed(123)
+n <- 200
+p <- 9
+X <- cbind(1, matrix(rnorm(n * (p - 1)), nrow = n))
+true_beta <- c(0.1, 1.1, -0.9)
+
+M <- 20
+multi_chain_samples <- array(NA, dim = c(n_iter, p, M))
+for (m in 1:M) {
+  start_random <- rnorm(p, mean = 0, sd = 1)
+  mh_result_chain <- metropolis_hastings(start_random, X, y, n_iter, proposal_sd)
+  multi_chain_samples[, , m] <- mh_result_chain$samples
+}
+
+# Convert to mcmc.list for coda
+chains <- mcmc.list(lapply(1:M, function(m) mcmc(multi_chain_samples[, , m])))
+gelman_rubin <- gelman.diag(mcmc.list(chains))
+
+# Running Gelman-Rubin statistic plot
+
+g_plot <- gelman.plot(chains, main="Gelman-Rubin Diagnostic",auto.layout=FALSE,autoburnin = FALSE)
+
+
+```
+Interpretation of the Plot:
+
+Initially, the shrink factor is above 1, indicating that the chains haven't converged yet.
+
+The shrink factor rapidly decreases as the iterations increase, indicating that the chains are starting to mix and agree on the posterior distribution.
+
+Both the median (solid line) and the 97.5% quantile (dashed line) approach 1 as the iterations increase, suggesting that the chains are converging to the same value and the sampler has likely reached stationarity.
+
+Convergence appears to occur around 2000-3000 iterations, after which the shrink factor stabilizes near 1, confirming that the chains are mixing well and that the MCMC run is complete.
+
+in summary This plot indicates that the MCMC chains have converged to the stationary distribution after around 2000-3000 iterations. The shrink factor approaching 1 is a good sign that the posterior samples are stable and reliable.
+
+
+```{r pressure22, echo=FALSE}
+
+```
+
+
+```{r}
+
+```
+
+## QUESTION 4(Metropolis-within-Gibbs (MWG))
+
+```{r pressure444,fig.width=5, fig.height=3, out.width="50%", echo=FALSE}
+# Libraries
+library(coda)  # For convergence diagnostics
+
+# Logistic function
+logistic <- function(x) {
+  return(1 / (1 + exp(-x)))
+}
+
+# Log posterior function
+log_posterior <- function(beta, X, y) {
+  # Prior term: Gaussian N(0, 1)
+  log_prior <- sum(dnorm(beta, mean = 0, sd = 1, log = TRUE))
+  
+  # Likelihood term
+  eta <- X %*% beta
+  log_likelihood <- sum(y * log(logistic(eta)) + (1 - y) * log(1 - logistic(eta)))
+  
+  return(log_prior + log_likelihood)
+}
+
+# Random-Walk Metropolis-Hastings
+metropolis_hastings <- function(start, X, y, n_iter, proposal_sd) {
+  beta <- start
+  samples <- matrix(NA, nrow = n_iter, ncol = length(start))
+  acceptance_count <- 0
+  
+  for (i in 1:n_iter) {
+    proposal <- beta + rnorm(length(beta), mean = 0, sd = proposal_sd)
+    log_acceptance_ratio <- log_posterior(proposal, X, y) - log_posterior(beta, X, y)
+    
+    if (log(runif(1)) < log_acceptance_ratio) {
+      beta <- proposal
+      acceptance_count <- acceptance_count + 1
+    }
+    
+    samples[i, ] <- beta
+  }
+  
+  acceptance_rate <- acceptance_count / n_iter
+  return(list(samples = samples, acceptance_rate = acceptance_rate))
+}
+
+# Metropolis-within-Gibbs
+metropolis_within_gibbs <- function(start, X, y, n_iter, proposal_sd) {
+  beta <- start
+  p <- length(start)
+  samples <- matrix(NA, nrow = n_iter, ncol = p)
+  acceptance_counts <- rep(0, p)
+  
+  for (i in 1:n_iter) {
+    for (j in 1:p) {
+      # Propose new value for beta[j]
+      proposal <- beta
+      proposal[j] <- beta[j] + rnorm(1, mean = 0, sd = proposal_sd[j])
+      
+      # Calculate acceptance ratio
+      log_acceptance_ratio <- log_posterior(proposal, X, y) - log_posterior(beta, X, y)
+      
+      if (log(runif(1)) < log_acceptance_ratio) {
+        beta[j] <- proposal[j]
+        acceptance_counts[j] <- acceptance_counts[j] + 1
+      }
+    }
+    samples[i, ] <- beta
+  }
+  
+  acceptance_rates <- acceptance_counts / n_iter
+  return(list(samples = samples, acceptance_rates = acceptance_rates))
+}
+
+# Generate synthetic data
+set.seed(123)
+n <- 200
+p <- 9
+X <- cbind(1, matrix(rnorm(n * (p - 1)), nrow = n))
+true_beta <- c(0.1, 1.1, -0.9, 1.0, -1.9, 1.1, -0.5, 1.7, -0.9)
+y <- rbinom(n, size = 1, prob = logistic(X %*% true_beta))
+
+# Run Metropolis-Hastings
+n_iter <- 10000
+start <- c(0.1, 1.1, -0.9, 1.0, -1.9, 1.1, -0.5, 1.7, -0.9)
+proposal_sd <- 0.1  # Tune for 23.4% acceptance
+mh_result <- metropolis_hastings(start, X, y, n_iter, proposal_sd)
+
+# Run Metropolis-within-Gibbs
+proposal_sd_gibbs <- rep(0.05, p)  # Tune for ~15% acceptance per parameter
+gibbs_result <- metropolis_within_gibbs(start, X, y, n_iter, proposal_sd_gibbs)
+```
+
+
+```{r}
+
+```
+
+## Trace Plot(MH)
+```{r pressure4,fig.width=6, fig.height=3, out.width="50%", echo=FALSE}
+# Trace plots
+samples_mh <- mh_result$samples
+samples_gibbs <- gibbs_result$samples
+
+par(mfrow = c(1, 1))
+for (j in 1:p) {
+  plot(samples_mh[, j], type = 'l', main = paste0("Trace plot for beta[", j, "] (MH)"), 
+       xlab = "Iteration", ylab = paste0("beta[", j, "]"))
+  abline(h = true_beta[j], col = "red", lty = 2)
+}
+```
+The trace plot  shows the values of beta over iterations ranging from 0 to 10000. The plot appears noisy, with the values fluctuating around the 0 line. The red dashed line represents the mean value of the trace plot.
+
+```{r}
+
+```
+
+## Gibbs
+```{r pressure44,echo=FALSE}
+par(mfrow = c(3, 3))
+for (j in 1:p) {
+  plot(samples_gibbs[, j], type = 'l', main = paste0("Trace plot for beta[", j, "] (Gibbs)"), 
+       xlab = "Iteration", ylab = paste0("beta[", j, "]"))
+  abline(h = true_beta[j], col = "red", lty = 2)
+}
+```
+
+The trace plot for each of the beta variables (beta[1] to beta[9]) in the image shows the values of the respective beta variables over iterations from 0 to 10000. Each plot displays fluctuations around the mean value represented by the red dashed line. The data points is scattered, indicating noise in the data. There is no  significant deviation observed in the values of the beta variables over the iterations. Despite the fluctuations, the mean lines suggest relative stability in the beta values over time.
+
+```{r}
+
+```
+
+## QUESTION 5 (Metropolis-within-Gibbs (MWG) and Mixed Proposals)
+
+```{r pressure5,fig.width=8, fig.height=3, out.width="50%", echo=FALSE}
+# Random-proposal Metropolis-Hastings
+ 
+logit <- function(x) {
+  return(1 / (1 + exp(-x)))
+}
+
+# Log posterior function
+log_post <- function(beta, X, y) {
+  # Prior term: Gaussian N(0, 1)
+  log_prior <- sum(dnorm(beta, mean = 0, sd = 1, log = TRUE))
+  
+  # Likelihood term
+  eta <- X %*% beta
+  log_likelihood <- sum(y * log(logistic(eta)) + (1 - y) * log(1 - logistic(eta)))
+  
+  return(log_prior + log_likelihood)
+}
+
+rproposalmh <- function(start, X, y, n_iter, proposal_sd_10, proposal_sd_30) {
+  beta <- start
+  samples <- matrix(NA, nrow = n_iter, ncol = length(start))
+  acceptance_count <- 0
+  
+  for (i in 1:n_iter) {
+    # Randomly choose a proposal standard deviation
+    proposal_sd <- ifelse(runif(1) < 0.5, proposal_sd_10, proposal_sd_30)
+    proposal <- beta + rnorm(length(beta), mean = 0, sd = proposal_sd)
+    
+    # Calculate acceptance ratio
+    logacratio <- log_post (proposal, X, y) - log_post(beta, X, y)
+    
+    if (log(runif(1)) < logacratio) {
+      beta <- proposal
+      acceptance_count <- acceptance_count + 1
+    }
+    
+    samples[i, ] <- beta
+  }
+  
+  acceptance_rate <- acceptance_count / n_iter
+  return(list(samples = samples, acceptance_rate = acceptance_rate))
+}
+
+# Generate synthetic data
+set.seed(123)
+n <- 200
+p <- 9
+X <- cbind(1, matrix(rnorm(n * (p - 1)), nrow = n))
+true_beta <- c(0.1, 1.1, -0.6, 1.2, -1.6, 1.1, -0.5, 1.5, -0.6)
+y <- rbinom(n, size = 1, prob = logit(X %*% true_beta))
+
+# Run Random-Proposal Metropolis-Hastings
+n_iter <- 10000
+start <- c(0.1, 1.1, -0.6, 1.2, -1.6, 1.1, -0.5, 1.5, -0.6)
+proposal_sd_10 <- 0.05  # Tuned for ~10% acceptance
+proposal_sd_30 <- 0.15  # Tuned for ~30% acceptance
+mh_result <- rproposalmh(start, X, y, n_iter, proposal_sd_10, proposal_sd_30)
+```
+
+
+## Trace plots
+```{r pressure6, echo=FALSE}
+# Trace plots
+samples <- mh_result$samples
+par(mfrow = c(3, 3))
+for (j in 1:p) {
+  plot(samples[, j], type = 'l', main = paste0("Trace plot for beta[", j, "]"), 
+       xlab = "Iteration", ylab = paste0("beta[", j, "]"))
+  abline(h = true_beta[j], col = "red", lty = 2)
+}
+```
+The trace plots suggest that the MCMC chains for all beta parameters have converged and are mixing well. This indicates that the samples from the posterior distribution are reliable for inference.
+
+```{r}
+
+```
+
+## Burn-in and posterior histograms
+```{r pressure10, echo=FALSE}
+# Burn-in and posterior histograms
+burn_in <- 2000
+post_burn_samples <- samples[(burn_in + 1):n_iter, ]
+
+par(mfrow = c(3, 3))
+for (j in 1:p) {
+  hist(post_burn_samples[, j], breaks = 30, probability = TRUE,
+       main = paste0("Histogram for beta[", j, "]"),
+       xlab = paste0("beta[", j, "]"), col = "lightblue")
+  abline(v = mean(post_burn_samples[, j]), col = "red", lwd = 2, lty = 2)  # Posterior mean
+  abline(v = true_beta[j], col = "green", lwd = 2, lty = 2)  # True value, 
+         }
+
+
+```
+The image shows histograms for the posterior distributions of the parameters beta[1] through beta[9] obtained from a Bayesian analysis.
+
+
+The posterior distributions for all parameters are well-behaved, approximately normal, and symmetric, indicating proper convergence and reliable inference.
+
+Most parameters have relatively narrow posterior distributions, suggesting low uncertainty in their estimates.
+
+For further interpretation, the credible intervals (green lines) can be used to assess the range of plausible values for each parameter.
+
+
+```{r}
+
+```
+
+## Gelman-Rubin diagnostic
+```{r pressure111,fig.width=5, fig.height=3, out.width="50%", echo=FALSE}
+# Gelman-Rubin diagnostic
+M <- 20
+multi_chain_samples <- array(NA, dim = c(n_iter, p, M))
+for (m in 1:M) {
+  start_random <- rnorm(p, mean = 0, sd = 1)
+  mh_result_chain <- rproposalmh(start_random, X, y, n_iter, proposal_sd_10, proposal_sd_30)
+  multi_chain_samples[, , m] <- mh_result_chain$samples
+}
+```
+The results indicate that the MCMC chains have converged satisfactorily:
+
+The PSRF values are very close to 1.00 for all parameters.
+The multivariate PSRF of 1.03 further confirms overall convergence.
+The chains can now be used for posterior inference, as they are sampling 
+from the target posterior distribution.
+
+
+```{r}
+
+```
+
+
+```{r pressure11, out.width="50%", echo=TRUE}
+# Convert to mcmc.list format
+mcmcc_chain <- mcmc.list(lapply(1:M, function(m) mcmc(multi_chain_samples[, , m])))
+
+# Compute Gelman-Rubin diagnostic
+gelmd <- gelman.diag(mcmcc_chain)
+print(gelmd)
+
+# Running Gelman-Rubin statistic
+
+par(mfrow = c(1, 1))
+gel_plot <- gelman.plot(mcmcc_chain, main="Gelman-Rubin Diagnostic",auto.layout=FALSE,autoburnin = FALSE)
+
+
+```
+From the above plot : 
+
+Convergence Achieved: The Gelman-Rubin diagnostic confirms that the MCMC chains have converged for all parameters (beta[1] through beta[9]).
+
+Reliability of Inference: Since the shrink factors are close to 1, the posterior estimates obtained from the chains can be considered reliable.
+
+Recommendation: No additional iterations or steps are needed for convergence. However, it’s always good to supplement this diagnostic with other measures (e.g., trace plots and effective sample size).
+
